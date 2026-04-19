@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Helvetica Neue', Arial, sans-serif;
+  
+  --color-vibrant-bg: #ffeef2;
+  --color-vibrant-pink: #ff85a2;
+  --color-vibrant-dark: #d81b60;
+  --color-vibrant-accent: #ff4081;
+  --color-vibrant-light-pink: #ffd1dc;
+}
+
+@layer base {
+  body {
+    @apply bg-vibrant-bg text-[#444];
+    cursor: url('/assets/icons/handicorn.webp'), auto;
+  }
+  
+  button, 
+  [role="button"],
+  .cursor-pointer {
+    cursor: url('/assets/icons/handicorn.webp') 16 16, pointer !important;
+  }
+}
