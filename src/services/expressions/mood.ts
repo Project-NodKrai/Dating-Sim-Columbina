@@ -41,6 +41,14 @@ export const updateMoodExpression = (vrm: VRM, mood: Mood): void => {
       // 'tired' typically uses 'relaxed' but can also have a bit of 'sad'
       expressions.setValue('relaxed', 0.6);
       break;
+    case 'surprised':
+      expressions.setValue('surprised', 1.0);
+      break;
+    case 'shy':
+      expressions.setValue('happy', 0.5);
+      expressions.setValue('relaxed', 0.5);
+      // 살짝 당황/기쁨이 섞인 표정
+      break;
     case 'neutral':
     default:
       // 기존의 relaxed(0.1)가 입꼬리를 아주 살짝 올리고 있었으므로, 

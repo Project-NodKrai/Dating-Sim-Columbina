@@ -12,7 +12,7 @@ export interface GameStats {
   xp: number;
 }
 
-export type Mood = 'happy' | 'neutral' | 'sad' | 'excited' | 'tired' | 'angry';
+export type Mood = 'happy' | 'neutral' | 'sad' | 'excited' | 'tired' | 'angry' | 'surprised' | 'shy';
 
 export interface CharacterState extends GameStats {
   name: string;

@@ -10,6 +10,11 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { Mood } from '../../types';
 import { applyNaturalStandPose } from '../../services/poses/naturalStand';
+import { applyPettingPose } from '../../services/poses/pettingPose';
+import { applyPlayPose } from '../../services/poses/playPose';
+import { applySurprisedPose } from '../../services/poses/surprisedPose';
+import { applyShyPose } from '../../services/poses/shyPose';
+import { applySleepPose } from '../../services/poses/sleepPose';
 import { updateBlink } from '../../services/expressions/blink';
 import { updateChatter } from '../../services/expressions/chatter';
 import { updateMoodExpression } from '../../services/expressions/mood';
@@ -125,7 +130,7 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
         mixerRef.current = new THREE.AnimationMixer(vrm.scene);
 
         // --- Initial Pose Adjustment ---
-        applyNaturalStandPose(vrm, 0, 0);
+        applyNaturalStandPose(vrm, 0);
 
         // Ensure lookAt target is set
         if (vrm.lookAt) {
@@ -178,6 +183,10 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
     const clock = new THREE.Clock();
     let animationId: number;
     let pettingIntensity = 0;
+    let playIntensity = 0;
+    let surprisedIntensity = 0;
+    let shyIntensity = 0;
+    let sleepIntensity = 0;
 
     const animate = () => {
       animationId = requestAnimationFrame(animate);
@@ -204,28 +213,54 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
             mixerRef.current.update(delta);
           }
 
-          // Calculate current petting intensity
-          // Action is pet (Petting button pressed)
+          // Calculate current intensities
           const isPetting = currentActionRef.current === 'pet';
           const isSleeping = currentActionRef.current === 'sleep';
           const isPlaying = currentActionRef.current === 'play';
+          const isSurprised = moodRef.current === 'surprised';
+          const isShy = moodRef.current === 'shy';
 
           if (isPetting) {
             pettingIntensity = Math.min(1.0, pettingIntensity + delta * 5);
           } else {
             pettingIntensity = Math.max(0.0, pettingIntensity - delta * 3);
           }
-
-          // Apply Natural Stand Pose (Breathing, Spine, Arms, Legs)
-          // Add extra head tilt if playing
-          const playMotion = isPlaying ? Math.sin(time * 8) * 0.1 : 0;
-          applyNaturalStandPose(vrm, time, pettingIntensity);
-          if (isPlaying && vrm.humanoid) {
-            const head = vrm.humanoid.getNormalizedBoneNode('head');
-            if (head) head.rotation.z += playMotion;
+          
+          if (isPlaying) {
+            playIntensity = Math.min(1.0, playIntensity + delta * 5);
+          } else {
+            playIntensity = Math.max(0.0, playIntensity - delta * 3);
           }
 
-          if (currentActionRef.current !== 'idle' && currentActionRef.current !== 'pet' && currentActionRef.current !== 'sleep' && currentActionRef.current !== 'play') {
+          if (isSurprised) {
+            surprisedIntensity = Math.min(1.0, surprisedIntensity + delta * 8); // 놀람은 매우 빠르게
+          } else {
+            surprisedIntensity = Math.max(0.0, surprisedIntensity - delta * 2);
+          }
+
+          if (isShy) {
+            shyIntensity = Math.min(1.0, shyIntensity + delta * 3);
+          } else {
+            shyIntensity = Math.max(0.0, shyIntensity - delta * 2);
+          }
+
+          if (isSleeping) {
+            sleepIntensity = Math.min(1.0, sleepIntensity + delta * 2); // 눕듯이 서서히
+          } else {
+            sleepIntensity = Math.max(0.0, sleepIntensity - delta * 3);
+          }
+
+          // Step 1: Base idle posture
+          applyNaturalStandPose(vrm, time);
+
+          // Step 2: Layer independent action poses
+          applyPettingPose(vrm, time, pettingIntensity);
+          applyPlayPose(vrm, time, playIntensity);
+          applySurprisedPose(vrm, time, surprisedIntensity);
+          applyShyPose(vrm, time, shyIntensity);
+          applySleepPose(vrm, time, sleepIntensity);
+
+          if (currentActionRef.current !== 'idle' && !['pet', 'sleep', 'play'].includes(currentActionRef.current)) {
             // Fallback for other actions
             currentActionRef.current = 'idle';
             if (onActionComplete) onActionComplete();
@@ -248,13 +283,30 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
           // Expression Management (Blink)
           // Forced eyes closed if sleeping
           const shouldForcedClose = isSleeping;
-          const isSmilingMood = moodRef.current === 'happy' || moodRef.current === 'excited';
-          const maxBlink = moodRef.current === 'angry' ? 0.5 : 1.0;
+          
+          // If the expression uses 'happy' (happy, excited, shy), blinking should be disabled or severely reduced
+          // because the eyes are already shaped by the smile blendshape.
+          const isSmilingMood = moodRef.current === 'happy' || moodRef.current === 'excited' || moodRef.current === 'shy';
+          
+          let maxBlink = 1.0;
+          if (moodRef.current === 'angry') {
+            maxBlink = 0.5;
+          } else if (moodRef.current === 'tired') {
+            maxBlink = 0.4; // Tired already uses 'relaxed' which often lowers eyelids
+          } else if (moodRef.current === 'sad') {
+            maxBlink = 0.7; // Sad lowers eyelids slightly
+          } else if (moodRef.current === 'shy') {
+            maxBlink = 0.3; // Shy uses half-happy, so blink should be very low if any
+          }
           
           if (shouldForcedClose) {
             vrm.expressionManager?.setValue('blink', 1.0);
+          } else if (isSmilingMood) {
+            // completely disable procedural blink for smiling actions to avoid weird distortions
+            // or we could allow a tiny maxBlink (e.g. 0.0)
+            updateBlink(vrm, time, false, 0); 
           } else {
-            updateBlink(vrm, time, !isSmilingMood, maxBlink);
+            updateBlink(vrm, time, true, maxBlink);
           }
 
           // Expression Management (Chatter/LipSync)
