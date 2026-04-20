@@ -40,10 +40,13 @@ export const DialogueBox: React.FC<DialogueBoxProps> = ({ dialogue, isLoading, o
           return;
         }
 
-        if (dialogue.text[i]) {
-          setDisplayedText(prev => prev + dialogue.text[i]);
+        if (i < dialogue.text.length) {
+          const char = dialogue.text.charAt(i);
+          if (char) {
+            setDisplayedText(prev => prev + char);
+          }
+          i++;
         }
-        i++;
         
         if (i >= dialogue.text.length) {
           clearInterval(interval);

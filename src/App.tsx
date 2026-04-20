@@ -11,6 +11,7 @@ import { useGameState } from './hooks/useGameState';
 import { Dialogue } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Pizza, Bath, Hand, Moon, Gamepad2 } from 'lucide-react';
+import { getDialogue } from './services/dialogueManager';
 
 export default function App() {
   const { state, updateStats, setMood, interact } = useGameState();
@@ -18,7 +19,7 @@ export default function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [dialogue, setDialogue] = useState<Dialogue>({
     speaker: '콜롬비나',
-    text: "흥... 드디어 왔어? 내가 기다린 건 절대 아니니까 착각하지 마! 그냥 네가 너무 늦어서 짜증났을 뿐이야.",
+    text: getDialogue('system', 'greeting'),
     mood: 'neutral'
   });
   const [loading, setLoading] = useState(false);
@@ -61,7 +62,7 @@ export default function App() {
           updateStats({ energy: Math.min(100, state.energy + 5) });
           setDialogue({
             speaker: '콜롬비나',
-            text: '으음... 너무 피곤해... 자꾸 눈이 감겨...',
+            text: getDialogue('random', 'sleep'),
             mood: 'tired',
             timestamp: Date.now()
           });
@@ -74,7 +75,7 @@ export default function App() {
           setMood('angry');
           setDialogue({
             speaker: '콜롬비나',
-            text: '아 진짜! 꼬르륵거리잖아! 나 언제까지 굶길 셈이야?!',
+            text: getDialogue('random', 'hungry'),
             mood: 'angry',
             timestamp: Date.now()
           });
@@ -87,7 +88,7 @@ export default function App() {
           setMood('sad');
           setDialogue({
             speaker: '콜롬비나',
-            text: '으으... 뭔가 찝찝해... 씻고 싶은데 기분이 영 아니네...',
+            text: getDialogue('random', 'dirty'),
             mood: 'sad',
             timestamp: Date.now()
           });
@@ -105,9 +106,7 @@ export default function App() {
           setMood(isShy ? 'shy' : 'happy');
           setDialogue({
             speaker: '콜롬비나',
-            text: isShy 
-              ? '...뭘 그렇게 쳐다봐? 바보. 부끄럽게...'
-              : '흥흥~♪ 너랑 노는 것도 꽤 나쁘지 않은 거 같아!',
+            text: isShy ? getDialogue('random', 'shy') : getDialogue('random', 'happy'),
             mood: isShy ? 'shy' : 'happy',
             timestamp: Date.now()
           });
@@ -131,7 +130,7 @@ export default function App() {
         setMood('surprised');
         setDialogue({
           speaker: '콜롬비나',
-          text: '앗! 으음... 뭐야, 언제 온 거야? 깜짝 놀랐잖아!',
+          text: getDialogue('system', 'idle_wakeup'),
           mood: 'surprised',
           timestamp: Date.now()
         });
@@ -190,7 +189,7 @@ export default function App() {
           setMood('shy');
           setDialogue({
             speaker: '콜롬비나',
-            text: "앗 깜짝이야! ...그, 그렇게 확 만지면 부끄럽잖아... 바보야.",
+            text: getDialogue('system', 'rapid_click_high'),
             mood: 'shy',
             timestamp: Date.now()
           });
@@ -198,7 +197,7 @@ export default function App() {
           setMood('angry');
           setDialogue({
             speaker: '콜롬비나',
-            text: "앗 깜짝이야! 장난치지 마! 진짜 화낸다?!",
+            text: getDialogue('system', 'rapid_click_low'),
             mood: 'angry',
             timestamp: Date.now()
           });
@@ -222,33 +221,33 @@ export default function App() {
       case 'feed':
         updateStats({ hunger: Math.min(100, state.hunger + 20), xp: state.xp + 10 });
         if (state.hunger < 30) {
-          text = "아... 진짜 배고팠는데... 고마워. 이번만 특별히 인사해주는 거야.";
+          text = getDialogue('feed', 'hungry');
           mood = 'happy';
         } else if (state.hunger > 80) {
-          text = "이제 배불러... 꼭 더 먹여야겠어? 뭐, 맛은 있네.";
+          text = getDialogue('feed', 'full');
           mood = 'neutral';
         } else {
-          text = "맛있어! 고마워. 너 오늘 좀 친절하네?";
+          text = getDialogue('feed', 'normal');
           mood = 'happy';
         }
         break;
       case 'clean':
         updateStats({ cleanliness: 100, xp: state.xp + 5 });
         if (state.cleanliness < 50) {
-          text = "으으... 지저분한 건 딱 질색이야. 깨끗해지니까 좀 낫네.";
+          text = getDialogue('clean', 'dirty');
           mood = 'neutral';
         } else {
-          text = "아... 깨끗해진 건 좋은데, 꼭 이렇게 씻겨줘야 했어? 부끄럽단 말이야!";
+          text = getDialogue('clean', 'normal');
           mood = 'angry';
         }
         break;
       case 'pet':
         updateStats({ energy: Math.max(0, state.energy - 5), happiness: Math.min(100, state.happiness + 10), xp: state.xp + 5 });
         if (state.energy < 20) {
-          text = "하아... 피곤해... 이제 그만 놀면 안 될까?";
+          text = getDialogue('pet', 'tired');
           mood = 'tired';
         } else {
-          text = "에헤헤... 쓰담쓰담 기분 좋아... 아, 아냐! 그냥 머리가 좀 가려웠을 뿐이라고!";
+          text = getDialogue('pet', 'normal');
           mood = 'excited';
         }
         break;
@@ -258,7 +257,7 @@ export default function App() {
           hunger: Math.max(0, state.hunger - 10),
           xp: state.xp + 5 
         });
-        text = "으음... 졸려... 잘 자라고 말해주는 거야? 고마워... 잘 자...";
+        text = getDialogue('sleep', 'normal');
         mood = 'neutral';
         break;
       case 'play':
@@ -270,10 +269,10 @@ export default function App() {
           xp: state.xp + 20 
         });
         if (state.energy < 30) {
-          text = "지쳐... 너무 많이 논 거 같아. 그래도 기분은 최고야!";
+          text = getDialogue('play', 'tired');
           mood = 'happy';
         } else {
-          text = "와아! 신난다! 더 신나게 놀아보자! 너 의외로 놀아주는 법을 아네?";
+          text = getDialogue('play', 'normal');
           mood = 'excited';
         }
         break;
