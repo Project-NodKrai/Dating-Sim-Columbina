@@ -281,33 +281,8 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
           updateMoodExpression(vrm, moodRef.current);
           
           // Expression Management (Blink)
-          // Forced eyes closed if sleeping
-          const shouldForcedClose = isSleeping;
-          
-          // If the expression uses 'happy' (happy, excited, shy), blinking should be disabled or severely reduced
-          // because the eyes are already shaped by the smile blendshape.
-          const isSmilingMood = moodRef.current === 'happy' || moodRef.current === 'excited' || moodRef.current === 'shy';
-          
-          let maxBlink = 1.0;
-          if (moodRef.current === 'angry') {
-            maxBlink = 0.5;
-          } else if (moodRef.current === 'tired') {
-            maxBlink = 0.4; // Tired already uses 'relaxed' which often lowers eyelids
-          } else if (moodRef.current === 'sad') {
-            maxBlink = 0.7; // Sad lowers eyelids slightly
-          } else if (moodRef.current === 'shy') {
-            maxBlink = 0.3; // Shy uses half-happy, so blink should be very low if any
-          }
-          
-          if (shouldForcedClose) {
-            vrm.expressionManager?.setValue('blink', 1.0);
-          } else if (isSmilingMood) {
-            // completely disable procedural blink for smiling actions to avoid weird distortions
-            // or we could allow a tiny maxBlink (e.g. 0.0)
-            updateBlink(vrm, time, false, 0); 
-          } else {
-            updateBlink(vrm, time, true, maxBlink);
-          }
+          // `blink.ts` 내부에서 isSleeping 강제 감기와 mood에 따른 maxBlink 감쇠를 모두 처리합니다.
+          updateBlink(vrm, time, moodRef.current, isSleeping);
 
           // Expression Management (Chatter/LipSync)
           updateChatter(vrm, time, isSpeakingRef.current);
