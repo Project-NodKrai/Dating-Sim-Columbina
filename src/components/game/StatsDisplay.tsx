@@ -10,6 +10,7 @@ import { Heart, Zap, Coffee, Sparkles, Brain, Clock, Book, X } from 'lucide-reac
 
 interface StatsDisplayProps {
   state: CharacterState;
+  className?: string;
 }
 
 const getTitleForLevel = (level: number) => {
@@ -90,7 +91,7 @@ const getDynamicTime = (phase: string, ap: number, maxAp: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 };
 
-export const StatsDisplay: React.FC<StatsDisplayProps> = ({ state }) => {
+export const StatsDisplay: React.FC<StatsDisplayProps> = ({ state, className }) => {
   const [showLog, setShowLog] = useState(false);
   
   const titleText = getTitleForLevel(state.level);
@@ -99,7 +100,7 @@ export const StatsDisplay: React.FC<StatsDisplayProps> = ({ state }) => {
 
   return (
     <>
-      <div className="absolute top-5 left-5 z-20 flex flex-col gap-4">
+      <div className={className || "absolute top-5 left-5 z-20 flex flex-col gap-4"}>
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}

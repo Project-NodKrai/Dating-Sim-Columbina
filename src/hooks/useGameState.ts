@@ -156,6 +156,18 @@ export function useGameState() {
     });
   }, []);
 
+  const takeNap = useCallback(() => {
+    setState(prev => {
+      let firstHop = getNextPhaseState(prev);
+      let secondHop = getNextPhaseState(firstHop);
+      return {
+        ...secondHop,
+        energy: Math.min(100, secondHop.energy + 30),
+        stress: Math.max(0, secondHop.stress - 10)
+      };
+    });
+  }, []);
+
   const useAp = useCallback((amount: number = 1) => {
     setState(prev => {
       let currentAp = Math.max(0, prev.ap - amount);
@@ -202,5 +214,6 @@ export function useGameState() {
     advancePhase,
     useAp,
     sleepToNextDay,
+    takeNap,
   };
 }

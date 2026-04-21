@@ -10,11 +10,11 @@ import { DialogueBox } from './components/game/DialogueBox';
 import { useGameState } from './hooks/useGameState';
 import { Dialogue, Choice, GameStats } from './types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Pizza, Bath, Hand, Moon, Gamepad2, Sunrise, Navigation } from 'lucide-react';
+import { Pizza, Bath, Hand, Moon, Gamepad2, Sunrise, Navigation, FastForward, Heart, Zap, Clock, Sparkles, Brain } from 'lucide-react';
 import { getDialogue } from './services/dialogueManager';
 
 export default function App() {
-  const { state, updateStats, setMood, interact, advancePhase, useAp, sleepToNextDay } = useGameState();
+  const { state, updateStats, setMood, interact, advancePhase, useAp, sleepToNextDay, takeNap } = useGameState();
   const [currentAction, setCurrentAction] = useState<'idle' | 'feed' | 'clean' | 'pet' | 'sleep' | 'play'>('idle');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [interactionUI, setInteractionUI] = useState<string | null>(null);
@@ -26,6 +26,23 @@ export default function App() {
     mood: 'neutral'
   });
   const [loading, setLoading] = useState(false);
+  const [showStatsModal, setShowStatsModal] = useState(false);
+  const [mobileStatIndex, setMobileStatIndex] = useState(0);
+
+  const mobileStatsList = [
+    { label: '호감도', value: state.happiness, icon: <Heart size={14} className="text-pink-500" />, color: 'bg-pink-500' },
+    { label: '체력', value: state.energy, icon: <Zap size={14} className="text-green-500" />, color: 'bg-green-500' },
+    { label: '허기', value: state.hunger, icon: <Pizza size={14} className="text-orange-500" />, color: 'bg-orange-500' },
+    { label: '청결도', value: state.cleanliness, icon: <Sparkles size={14} className="text-cyan-500" />, color: 'bg-cyan-500' },
+    { label: '스트레스', value: state.stress, icon: <Brain size={14} className="text-purple-500" />, color: 'bg-purple-500' },
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMobileStatIndex((prev) => (prev + 1) % mobileStatsList.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [mobileStatsList.length]);
 
   // 자동 기분 복구 및 극단적 상태 처리
   useEffect(() => {
@@ -324,6 +341,11 @@ export default function App() {
         setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `sleep_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
         choices = [
           {
+             label: '낮잠 자기 (2시간 경과)',
+             apCost: 1, 
+             action: () => executeNap()
+          },
+          {
              label: '재우기 (다음 날로 진행)',
              apCost: state.ap, // uses all remaining AP
              action: () => executeSleep()
@@ -515,6 +537,26 @@ export default function App() {
     }, 2000);
   };
 
+  const executeNap = () => {
+    let hLevel = getHappinessLevel(state.happiness);
+    let text = getDialogue('interaction', `nap_${hLevel}`) || '...졸려. 잠깐만 눈 좀 붙일게.';
+    
+    setInteractionUI(null);
+    setActiveChoices([]);
+    setLoading(true);
+    setCurrentAction('sleep');
+    
+    // Call takeNap from hook
+    takeNap();
+    
+    setDialogue({ speaker: '콜롬비나', text, mood: 'neutral', timestamp: Date.now() });
+    setMood('neutral');
+
+    setTimeout(() => {
+      setLoading(false);
+    }, 2000);
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden font-sans">
       {/* Background Atmosphere */}
@@ -537,62 +579,195 @@ export default function App() {
         </div>
       </div>
 
-      {/* Stats HUD */}
-      <StatsDisplay state={state} />
+      {/* 💻 PC UI (Desktop Layout) */}
+      <div className="hidden md:block pointer-events-none absolute inset-0 z-20">
+        <StatsDisplay state={state} />
 
-      {/* Interaction Menu (Right Side) */}
-      <AnimatePresence>
-        {!interactionUI && (
-          <motion.div 
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            className="absolute right-10 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-5"
-          >
-            {[
-              { icon: <Pizza size={28} />, label: '밥먹이기', type: 'feed' as const },
-              { icon: <Bath size={28} />, label: '씻기기', type: 'clean' as const },
-              { icon: <Hand size={28} />, label: '쓰담쓰담', type: 'pet' as const },
-              { icon: <Gamepad2 size={28} />, label: '놀아주기', type: 'play' as const },
-              { icon: <Moon size={28} />, label: '재우기', type: 'sleep' as const },
-            ].map((btn) => (
-              <button
-                key={btn.label}
-                onClick={() => openActionMenu(btn.type)}
-                disabled={loading || state.ap <= 0}
-                className="group relative w-16 h-16 md:w-20 md:h-20 rounded-full bg-white border-none shadow-[0_6px_15px_rgba(255,105,180,0.3)] cursor-pointer flex flex-col justify-center items-center gap-1 transition-all duration-200 hover:scale-110 hover:bg-[#fff0f5] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-95"
-              >
-                <span className="text-vibrant-accent group-hover:scale-110 transition-transform">
-                  {btn.icon}
-                </span>
-                <span className="text-[9px] md:text-[10px] font-bold text-vibrant-accent uppercase tracking-tighter">
-                  {btn.label}
-                </span>
-              </button>
-            ))}
-            
-            {/* Advance Phase Button */}
-            <button
-               onClick={() => { 
-                 advancePhase(); 
-                 setDialogue({speaker:'시스템', text:'다음 시간으로 이동했습니다.', mood: 'neutral', timestamp: Date.now()}); 
-               }}
-               className="mt-6 px-4 py-2 bg-gray-800 text-white font-bold rounded-2xl shadow-lg border-2 border-white hover:bg-gray-700 transition"
+        <AnimatePresence>
+          {!interactionUI && (
+            <motion.div 
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="absolute right-10 top-1/2 -translate-y-1/2 pointer-events-auto flex flex-col gap-5"
             >
-               시간 보내기
-            </button>
+              {[
+                { icon: <Pizza size={28} />, label: '밥먹이기', onClick: () => openActionMenu('feed'), disabled: state.ap <= 0 },
+                { icon: <Bath size={28} />, label: '씻기기', onClick: () => openActionMenu('clean'), disabled: state.ap <= 0 },
+                { icon: <Hand size={28} />, label: '쓰담쓰담', onClick: () => openActionMenu('pet'), disabled: state.ap <= 0 },
+                { icon: <Gamepad2 size={28} />, label: '놀아주기', onClick: () => openActionMenu('play'), disabled: state.ap <= 0 },
+                { icon: <Moon size={28} />, label: '재우기', onClick: () => openActionMenu('sleep'), disabled: state.ap <= 0 },
+                { 
+                  icon: <FastForward size={28} />, 
+                  label: '시간보내기', 
+                  onClick: () => {
+                    advancePhase();
+                    setDialogue({speaker:'시스템', text:'다음 시간으로 이동했습니다.', mood: 'neutral', timestamp: Date.now()});
+                  },
+                  disabled: false
+                },
+              ].map((btn) => (
+                <button
+                  key={btn.label}
+                  onClick={btn.onClick}
+                  disabled={loading || btn.disabled}
+                  className="group relative w-16 h-16 md:w-20 md:h-20 rounded-full bg-white border-none shadow-[0_6px_15px_rgba(255,105,180,0.3)] cursor-pointer flex flex-col justify-center items-center gap-1 transition-all duration-200 hover:scale-110 hover:bg-[#fff0f5] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-95"
+                >
+                  <span className="text-vibrant-accent group-hover:scale-110 transition-transform">
+                    {btn.icon}
+                  </span>
+                  <span className="text-[9px] md:text-[10px] font-bold text-vibrant-accent uppercase tracking-tighter">
+                    {btn.label}
+                  </span>
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <DialogueBox 
+          dialogue={dialogue} 
+          isLoading={loading} 
+          onSpeakingChange={setIsSpeaking}
+        />
+      </div>
+
+      {/* 📱 Mobile UI (Mobile Layout) */}
+      <div className="md:hidden flex flex-col justify-between absolute inset-0 z-20 pointer-events-none p-4">
+        {/* Mobile Top: Compact Stats */}
+        <div className="w-full flex justify-between gap-2 pt-safe pointer-events-auto">
+          {/* Rotating Stats Ticker */}
+          <div 
+            className="bg-white/90 backdrop-blur-sm px-4 py-2 rounded-2xl shadow-sm border border-vibrant-light-pink text-xs font-bold text-vibrant-dark flex-[2] flex flex-col justify-center items-center gap-1 active:scale-98 transition-transform cursor-pointer"
+            onClick={() => setShowStatsModal(true)}
+          >
+            <AnimatePresence mode="wait">
+              <motion.div 
+                key={mobileStatIndex}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                className="flex flex-col items-center w-full gap-1"
+              >
+                <div className="flex items-center gap-2">
+                  {mobileStatsList[mobileStatIndex].icon}
+                  <span className="text-vibrant-accent uppercase tracking-tighter text-[10px]">
+                    {mobileStatsList[mobileStatIndex].label}
+                  </span>
+                  <span className="text-gray-900">{Math.round(mobileStatsList[mobileStatIndex].value)}%</span>
+                </div>
+                <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                   <motion.div 
+                      initial={{ width: 0 }}
+                      animate={{ width: `${mobileStatsList[mobileStatIndex].value}%` }}
+                      className={`h-full ${mobileStatsList[mobileStatIndex].color}`} 
+                   />
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          <div 
+            className="bg-white/90 backdrop-blur-sm px-3 py-2 rounded-2xl shadow-sm border border-vibrant-light-pink text-xs font-bold text-vibrant-dark flex-1 flex flex-col items-center justify-center gap-0.5" 
+          >
+            <div className="flex items-center gap-1"><Clock size={12} className="text-blue-500" /> Day {state.day}</div>
+            <div className="text-[10px] text-vibrant-pink leading-none">{state.phase} <span className="text-gray-400 ml-1">AP:{state.ap}</span></div>
+          </div>
+        </div>
+
+        {/* Mobile Center: Empty to show Columbina */}
+        <div className="flex-1" />
+
+        {/* Mobile Bottom: Dialogue and Interaction Buttons */}
+        <div className="w-full pointer-events-auto space-y-3 pb-safe">
+          {/* Compact Dialogue Box for Mobile */}
+          <DialogueBox 
+            dialogue={dialogue} 
+            isLoading={loading} 
+            onSpeakingChange={setIsSpeaking}
+            className="relative w-full z-20"
+          />
+          
+          <AnimatePresence>
+            {!interactionUI && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="grid grid-cols-3 gap-2"
+              >
+                {[
+                  { icon: <Pizza size={20} />, label: '식사', onClick: () => openActionMenu('feed'), disabled: state.ap <= 0 },
+                  { icon: <Bath size={20} />, label: '씻기', onClick: () => openActionMenu('clean'), disabled: state.ap <= 0 },
+                  { icon: <Hand size={20} />, label: '쓰담', onClick: () => openActionMenu('pet'), disabled: state.ap <= 0 },
+                  { icon: <Gamepad2 size={20} />, label: '놀기', onClick: () => openActionMenu('play'), disabled: state.ap <= 0 },
+                  { icon: <Moon size={20} />, label: '수면', onClick: () => openActionMenu('sleep'), disabled: state.ap <= 0 },
+                  { 
+                    icon: <FastForward size={20} />, 
+                    label: '이동', 
+                    onClick: () => {
+                      advancePhase();
+                      setDialogue({speaker:'시스템', text:'다음 시간으로 이동했습니다.', mood: 'neutral', timestamp: Date.now()});
+                    },
+                    disabled: false
+                  },
+                ].map((btn) => (
+                  <button
+                    key={btn.label}
+                    onClick={btn.onClick}
+                    disabled={loading || btn.disabled}
+                    className="flex flex-col items-center justify-center p-2 rounded-2xl bg-white/95 border border-vibrant-light-pink shadow-md active:scale-95 disabled:opacity-50"
+                  >
+                    <span className="text-vibrant-accent mb-1">{btn.icon}</span>
+                    <span className="text-[10px] font-bold text-vibrant-accent">{btn.label}</span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {/* Mobile Stats Modal Overlay */}
+      <AnimatePresence>
+        {showStatsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md md:hidden flex items-center justify-center p-4 cursor-pointer"
+            onClick={() => setShowStatsModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <StatsDisplay 
+                state={state} 
+                className="relative flex flex-col gap-4 scale-90 md:scale-100"
+              />
+              <button 
+                className="mt-4 w-full bg-white/20 text-white rounded-full py-2 font-bold text-sm border border-white/30 backdrop-blur-sm"
+                onClick={() => setShowStatsModal(false)}
+              >
+                닫기
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Choice Menu Overlay */}
+      {/* Choice Menu Overlay (Shared) */}
       <AnimatePresence>
         {interactionUI && activeChoices.length > 0 && (
           <motion.div 
             initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col gap-3 w-[320px] md:w-[400px]"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col gap-3 w-[min(90vw,320px)] md:w-[400px] pointer-events-auto text-sm"
           >
             {activeChoices.map((choice, idx) => (
               <button
@@ -606,20 +781,15 @@ export default function App() {
             ))}
             <button
                onClick={closeActionMenu}
-               className="w-full mt-4 bg-gray-200 text-gray-700 rounded-[20px] p-3 text-center font-bold shadow-md hover:bg-gray-300 transition-colors"
+               className="w-full mt-2 bg-gray-200 text-gray-700 rounded-[20px] p-3 text-center font-bold shadow-md hover:bg-gray-300 transition-colors"
             >
                취소
             </button>
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Dialogue System */}
-      <DialogueBox 
-        dialogue={dialogue} 
-        isLoading={loading} 
-        onSpeakingChange={setIsSpeaking}
-      />
     </div>
   );
 }
+
+
