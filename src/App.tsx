@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { VRMViewer } from './components/vrm/VRMViewer';
 import { StatsDisplay } from './components/game/StatsDisplay';
 import { DialogueBox } from './components/game/DialogueBox';
+import { DirectPettingOverlay } from './components/game/DirectPettingOverlay';
 import { useGameState } from './hooks/useGameState';
 import { Dialogue, Choice, GameStats } from './types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -28,6 +29,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [mobileStatIndex, setMobileStatIndex] = useState(0);
+  const [isSleepingTransition, setIsSleepingTransition] = useState(false);
+  const [transitionText, setTransitionText] = useState('다음날...');
+  const [isDirectPetting, setIsDirectPetting] = useState(false);
+  const [pettingSpeed, setPettingSpeed] = useState(1.0);
 
   const mobileStatsList = [
     { label: '호감도', value: state.happiness, icon: <Heart size={14} className="text-pink-500" />, color: 'bg-pink-500' },
@@ -319,6 +324,11 @@ export default function App() {
             label: '장난스럽게 헝클어뜨리기 (AP 1 소모)',
             apCost: 1,
             action: () => executePet('tease')
+          },
+          {
+            label: '직접 쓰담기 (AP 2 소모)',
+            apCost: 2,
+            action: () => executeDirectPet()
           }
         ];
         break;
@@ -445,6 +455,47 @@ export default function App() {
     applyAction('clean', text, mood, stats, cost);
   };
 
+  const executeDirectPet = () => {
+    if (state.ap < 2) return;
+    setInteractionUI(null);
+    setActiveChoices([]);
+    setIsDirectPetting(true);
+    setCurrentAction('pet');
+  };
+
+  const handleDirectPetResult = (speed: 'fast' | 'slow') => {
+    setIsDirectPetting(false);
+    setPettingSpeed(1.0);
+    
+    let text = getDialogue('pet', 'normal');
+    let mood: Dialogue['mood'] = 'excited';
+    let stats: Partial<GameStats> = { energy: Math.max(0, state.energy - 5), xp: state.xp + 5 };
+    let cost = 2;
+
+    if (state.happiness < 30 && speed === 'fast') {
+      text = '앗! 갑자기 왜 이래?! 아프잖아!';
+      mood = 'angry';
+      stats.happiness = Math.max(0, state.happiness - 10);
+      stats.stress = Math.min(100, state.stress + 10);
+    } else if (state.happiness >= 60 && speed === 'slow') {
+      text = '...기분 좋아. 계속 쓰다듬어줘...';
+      mood = 'happy';
+      stats.happiness = Math.min(100, state.happiness + 15);
+      stats.stress = Math.max(0, state.stress - 15);
+    } else if (speed === 'fast') {
+      text = '아, 진짜...! 머리 헝클어지잖아. 그만해!';
+      mood = 'angry';
+      stats.happiness = Math.max(0, state.happiness - 5);
+      stats.stress = Math.min(100, state.stress + 5);
+    } else {
+      text = '...따뜻해. 고마워.';
+      mood = 'happy';
+      stats.happiness = Math.min(100, state.happiness + 10);
+    }
+
+    applyAction('pet', text, mood, stats, cost);
+  };
+
   const executePet = (type: string) => {
     let text = getDialogue('pet', 'normal');
     let mood: Dialogue['mood'] = 'excited';
@@ -525,6 +576,8 @@ export default function App() {
     setActiveChoices([]);
     setLoading(true);
     setCurrentAction('sleep');
+    setTransitionText('다음날...');
+    setIsSleepingTransition(true);
     
     // Calls sleepToNextDay which handles all AP, phase, day, and stat resets 
     sleepToNextDay();
@@ -534,7 +587,8 @@ export default function App() {
 
     setTimeout(() => {
       setLoading(false);
-    }, 2000);
+      setIsSleepingTransition(false);
+    }, 3000);
   };
 
   const executeNap = () => {
@@ -545,6 +599,8 @@ export default function App() {
     setActiveChoices([]);
     setLoading(true);
     setCurrentAction('sleep');
+    setTransitionText('휴식중...');
+    setIsSleepingTransition(true);
     
     // Call takeNap from hook
     takeNap();
@@ -554,7 +610,8 @@ export default function App() {
 
     setTimeout(() => {
       setLoading(false);
-    }, 2000);
+      setIsSleepingTransition(false);
+    }, 3000);
   };
 
   return (
@@ -574,13 +631,51 @@ export default function App() {
             mood={state.mood} 
             action={currentAction}
             isSpeaking={isSpeaking}
+            petSpeed={pettingSpeed}
+            isInteractivePetting={isDirectPetting}
             onActionComplete={() => setCurrentAction('idle')}
           />
         </div>
       </div>
 
+      {/* Sleep Transition Overlay */}
+      <AnimatePresence>
+        {isSleepingTransition && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1.2, ease: "easeInOut" }}
+            className="fixed inset-0 z-[1000] bg-black/95 flex items-center justify-center pointer-events-none"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.8 }}
+              className="text-white/80 font-sans font-light text-2xl tracking-[0.3em]"
+            >
+              {transitionText}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Direct Petting Overlay */}
+      {isDirectPetting && (
+        <DirectPettingOverlay
+          happiness={state.happiness}
+          onReaction={handleDirectPetResult}
+          onSpeedUpdate={setPettingSpeed}
+          onCancel={() => {
+            setIsDirectPetting(false);
+            setPettingSpeed(1.0);
+            setCurrentAction('idle');
+          }}
+        />
+      )}
+
       {/* 💻 PC UI (Desktop Layout) */}
-      <div className="hidden md:block pointer-events-none absolute inset-0 z-20">
+      <div className="hidden md:block pointer-events-none absolute inset-0 z-[3000]">
         <StatsDisplay state={state} />
 
         <AnimatePresence>
@@ -589,12 +684,24 @@ export default function App() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="absolute right-10 top-1/2 -translate-y-1/2 pointer-events-auto flex flex-col gap-5"
+              className="absolute right-10 top-24 pointer-events-auto flex flex-col gap-5"
             >
               {[
                 { icon: <Pizza size={28} />, label: '밥먹이기', onClick: () => openActionMenu('feed'), disabled: state.ap <= 0 },
                 { icon: <Bath size={28} />, label: '씻기기', onClick: () => openActionMenu('clean'), disabled: state.ap <= 0 },
-                { icon: <Hand size={28} />, label: '쓰담쓰담', onClick: () => openActionMenu('pet'), disabled: state.ap <= 0 },
+                { 
+                  icon: <Hand size={28} />, 
+                  label: '쓰담쓰담', 
+                  onClick: () => {
+                    if (isDirectPetting) {
+                      // 직접 쓰다듬기 도중 버튼을 누르면 즉시 완료 처리
+                      handleDirectPetResult('slow');
+                    } else {
+                      openActionMenu('pet');
+                    }
+                  }, 
+                  disabled: !isDirectPetting && state.ap <= 0 
+                },
                 { icon: <Gamepad2 size={28} />, label: '놀아주기', onClick: () => openActionMenu('play'), disabled: state.ap <= 0 },
                 { icon: <Moon size={28} />, label: '재우기', onClick: () => openActionMenu('sleep'), disabled: state.ap <= 0 },
                 { 
@@ -629,11 +736,12 @@ export default function App() {
           dialogue={dialogue} 
           isLoading={loading} 
           onSpeakingChange={setIsSpeaking}
+          className="absolute left-1/2 -translate-x-1/2 z-[3000] transition-all duration-500 ease-out bottom-16 lg:bottom-24 xl:bottom-28 2xl:bottom-36 w-[85%] max-w-[700px] lg:max-w-[800px] xl:max-w-[900px] 2xl:max-w-[1000px]"
         />
       </div>
 
       {/* 📱 Mobile UI (Mobile Layout) */}
-      <div className="md:hidden flex flex-col justify-between absolute inset-0 z-20 pointer-events-none p-4">
+      <div className="md:hidden flex flex-col justify-between absolute inset-0 z-[3000] pointer-events-none p-4">
         {/* Mobile Top: Compact Stats */}
         <div className="w-full flex justify-between gap-2 pt-safe pointer-events-auto">
           {/* Rotating Stats Ticker */}
@@ -685,7 +793,7 @@ export default function App() {
             dialogue={dialogue} 
             isLoading={loading} 
             onSpeakingChange={setIsSpeaking}
-            className="relative w-full z-20"
+            className="relative w-[94%] mx-auto z-[3000]"
           />
           
           <AnimatePresence>
@@ -699,7 +807,20 @@ export default function App() {
                 {[
                   { icon: <Pizza size={20} />, label: '식사', onClick: () => openActionMenu('feed'), disabled: state.ap <= 0 },
                   { icon: <Bath size={20} />, label: '씻기', onClick: () => openActionMenu('clean'), disabled: state.ap <= 0 },
-                  { icon: <Hand size={20} />, label: '쓰담', onClick: () => openActionMenu('pet'), disabled: state.ap <= 0 },
+                  { 
+                    icon: <Hand size={20} />, 
+                    label: '쓰담', 
+                    onClick: () => {
+                      if (isDirectPetting) {
+                        // 직접 쓰다듬기 도중 버튼을 누르면 즉시 완료 처리
+                        handleDirectPetResult('slow');
+                      } else {
+                        openActionMenu('pet');
+                      }
+                    }, 
+                    // 쓰담는 도중이면 비활성화 조건을 풀어 버튼을 누를 수 있게 함
+                    disabled: !isDirectPetting && state.ap <= 0 
+                  },
                   { icon: <Gamepad2 size={20} />, label: '놀기', onClick: () => openActionMenu('play'), disabled: state.ap <= 0 },
                   { icon: <Moon size={20} />, label: '수면', onClick: () => openActionMenu('sleep'), disabled: state.ap <= 0 },
                   { 
@@ -763,29 +884,38 @@ export default function App() {
       {/* Choice Menu Overlay (Shared) */}
       <AnimatePresence>
         {interactionUI && activeChoices.length > 0 && (
-          <motion.div 
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col gap-3 w-[min(90vw,320px)] md:w-[400px] pointer-events-auto text-sm"
-          >
-            {activeChoices.map((choice, idx) => (
-              <button
-                key={idx}
-                onClick={choice.action}
-                disabled={state.ap < (choice.apCost || 0)}
-                className="w-full relative overflow-hidden group bg-white/95 backdrop-blur-md border-[3px] border-vibrant-pink rounded-[20px] p-4 text-center font-bold text-vibrant-dark shadow-[0_8px_20px_rgba(255,105,180,0.2)] hover:bg-[#fff0f5] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
-              >
-                {choice.label}
-              </button>
-            ))}
-            <button
-               onClick={closeActionMenu}
-               className="w-full mt-2 bg-gray-200 text-gray-700 rounded-[20px] p-3 text-center font-bold shadow-md hover:bg-gray-300 transition-colors"
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={closeActionMenu}
+              className="fixed inset-0 z-[25] bg-black/10 backdrop-blur-[2px] pointer-events-auto cursor-pointer"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.95 }}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col gap-3 w-[min(90vw,320px)] md:w-[400px] pointer-events-auto text-sm"
             >
-               취소
-            </button>
-          </motion.div>
+              {activeChoices.map((choice, idx) => (
+                <button
+                  key={idx}
+                  onClick={choice.action}
+                  disabled={state.ap < (choice.apCost || 0)}
+                  className="w-full relative overflow-hidden group bg-white/95 backdrop-blur-md border-[3px] border-vibrant-pink rounded-[20px] p-4 text-center font-bold text-vibrant-dark shadow-[0_8px_20px_rgba(255,105,180,0.2)] hover:bg-[#fff0f5] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
+                >
+                  {choice.label}
+                </button>
+              ))}
+              <button
+                 onClick={closeActionMenu}
+                 className="w-full mt-2 bg-gray-200 text-gray-700 rounded-[20px] p-3 text-center font-bold shadow-md hover:bg-gray-300 transition-colors"
+              >
+                 취소
+              </button>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

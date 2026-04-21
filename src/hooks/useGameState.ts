@@ -108,10 +108,10 @@ export function useGameState() {
       if (newState.cleanliness !== undefined) newState.cleanliness = Math.max(0, Math.min(100, newState.cleanliness));
       if (newState.stress !== undefined) newState.stress = Math.max(0, Math.min(100, newState.stress));
       
-      // Level up logic
+      // Level up logic (handle multiple level ups)
       let newLevel = newState.level;
       let newXp = newState.xp;
-      if (newXp >= 100) {
+      while (newXp >= 100) {
         newLevel += 1;
         newXp -= 100;
       }
@@ -202,9 +202,27 @@ export function useGameState() {
   }, []);
 
   const interact = useCallback(() => {
-    setState(prev => ({ ...prev, lastInteraction: Date.now() }));
-    updateStats({ xp: state.xp + 5, happiness: Math.min(100, state.happiness + 2) });
-  }, [state.happiness, state.xp, updateStats]);
+    setState(prev => {
+      const updatedXp = prev.xp + 5;
+      const updatedHappiness = Math.min(100, prev.happiness + 2);
+      
+      // We manually apply the level up check logic here since updateStats isn't recursive-safe easily across functional updates
+      let newLevel = prev.level;
+      let newXp = updatedXp;
+      while (newXp >= 100) {
+        newLevel += 1;
+        newXp -= 100;
+      }
+
+      return { 
+        ...prev, 
+        lastInteraction: Date.now(),
+        xp: newXp,
+        level: newLevel,
+        happiness: updatedHappiness
+      };
+    });
+  }, []);
 
   return {
     state,

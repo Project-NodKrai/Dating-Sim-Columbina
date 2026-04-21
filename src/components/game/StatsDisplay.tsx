@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CharacterState } from '../../types';
-import { Heart, Zap, Coffee, Sparkles, Brain, Clock, Book, X } from 'lucide-react';
+import { Heart, Zap, Pizza, Sparkles, Brain, Clock, Book, X } from 'lucide-react';
 
 interface StatsDisplayProps {
   state: CharacterState;
@@ -134,7 +134,7 @@ export const StatsDisplay: React.FC<StatsDisplayProps> = ({ state, className }) 
           <div className="space-y-2">
             <ProgressBar value={state.happiness} color="#ff4081" label="호감도" icon={<Heart size={12} />} />
             <ProgressBar value={state.energy} color="#4caf50" label="체력" icon={<Zap size={12} />} />
-            <ProgressBar value={state.hunger} color="#ffb300" label="허기" icon={<Coffee size={12} />} />
+            <ProgressBar value={state.hunger} color="#ffb300" label="허기" icon={<Pizza size={12} />} />
             <ProgressBar value={state.cleanliness} color="#00bcd4" label="청결도" icon={<Sparkles size={12} />} />
             <ProgressBar value={state.stress} color="#9c27b0" label="스트레스" icon={<Brain size={12} />} />
           </div>

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { motion, AnimatePresence } from 'motion/react';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
@@ -24,6 +25,8 @@ interface VRMViewerProps {
   vrmUrl?: string;
   action?: 'idle' | 'feed' | 'clean' | 'play' | 'pet' | 'sleep';
   isSpeaking?: boolean;
+  petSpeed?: number;
+  isInteractivePetting?: boolean;
   onActionComplete?: () => void;
 }
 
@@ -32,6 +35,8 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
   vrmUrl = 'https://models.columbina.kr/models/c1.vrm',
   action = 'idle',
   isSpeaking = false,
+  petSpeed = 1.0,
+  isInteractivePetting = false,
   onActionComplete
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -45,6 +50,8 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
   const actionProgressRef = useRef<number>(0);
   const moodRef = useRef<Mood>(mood);
   const isSpeakingRef = useRef<boolean>(isSpeaking);
+  const petSpeedRef = useRef<number>(petSpeed);
+  const isInteractivePettingRef = useRef<boolean>(isInteractivePetting);
 
   // Sync state to internal refs to avoid stale closures in animation loop
   useEffect(() => {
@@ -54,6 +61,14 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
   useEffect(() => {
     isSpeakingRef.current = isSpeaking;
   }, [isSpeaking]);
+
+  useEffect(() => {
+    petSpeedRef.current = petSpeed;
+  }, [petSpeed]);
+
+  useEffect(() => {
+    isInteractivePettingRef.current = isInteractivePetting;
+  }, [isInteractivePetting]);
 
   // Sync action prop to internal ref
   useEffect(() => {
@@ -187,6 +202,31 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
     let surprisedIntensity = 0;
     let shyIntensity = 0;
     let sleepIntensity = 0;
+    let pettingPhase = 0; // State to track smooth phase accumulation
+
+    // Raycaster for checking if petting touches character
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2(-2, -2); // init offscreen
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      let clientX, clientY;
+      if ('touches' in e) {
+        if (e.touches.length > 0) {
+          clientX = e.touches[0].clientX;
+          clientY = e.touches[0].clientY;
+        } else {
+          return;
+        }
+      } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+      }
+      pointer.x = (clientX / window.innerWidth) * 2 - 1;
+      pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+    };
+
+    window.addEventListener('mousemove', handlePointerMove);
+    window.addEventListener('touchmove', handlePointerMove, { passive: true });
 
     const animate = () => {
       animationId = requestAnimationFrame(animate);
@@ -213,8 +253,19 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
             mixerRef.current.update(delta);
           }
 
+          // Raycast to check if hovering character
+          let isHoveringCharacter = false;
+          if (isInteractivePettingRef.current) {
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObject(vrm.scene, true);
+            isHoveringCharacter = intersects.length > 0;
+          }
+
           // Calculate current intensities
-          const isPetting = currentActionRef.current === 'pet';
+          // 직접 쓰다듬기 모드일 때는 마우스가 캐릭터 위에 있고, AND 속도가 0보다 커야 (실제로 움직이고 있어야) 모션이 재생됩니다.
+          const isActuallyMoving = petSpeedRef.current > 0.1;
+          const isPetting = currentActionRef.current === 'pet' && 
+                           (!isInteractivePettingRef.current || (isHoveringCharacter && isActuallyMoving));
           const isSleeping = currentActionRef.current === 'sleep';
           const isPlaying = currentActionRef.current === 'play';
           const isSurprised = moodRef.current === 'surprised';
@@ -222,8 +273,15 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
 
           if (isPetting) {
             pettingIntensity = Math.min(1.0, pettingIntensity + delta * 5);
+            // Accumulate phase smoothly based on petSpeed (mapped gently)
+            const speedFactor = 1.0 + (Math.min(Math.max(petSpeedRef.current, 0.5), 3.0) - 1.0) * 0.4; // 1.0 to 1.8 multiplier max
+            pettingPhase += delta * speedFactor;
           } else {
             pettingIntensity = Math.max(0.0, pettingIntensity - delta * 3);
+            // Continue advancing phase at base speed to smoothly return to rest if intensity > 0
+            if (pettingIntensity > 0) {
+              pettingPhase += delta;
+            }
           }
           
           if (isPlaying) {
@@ -254,7 +312,7 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
           applyNaturalStandPose(vrm, time);
 
           // Step 2: Layer independent action poses
-          applyPettingPose(vrm, time, pettingIntensity);
+          applyPettingPose(vrm, pettingPhase, pettingIntensity);
           applyPlayPose(vrm, time, playIntensity);
           applySurprisedPose(vrm, time, surprisedIntensity);
           applyShyPose(vrm, time, shyIntensity);
@@ -268,12 +326,17 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
 
           // Actions completion logic
           if (['pet', 'sleep', 'play'].includes(currentActionRef.current)) {
-            actionProgressRef.current += delta;
-            // Sleep stays longer
-            const duration = currentActionRef.current === 'sleep' ? 3.0 : 2.0;
-            if (actionProgressRef.current >= duration) {
-              currentActionRef.current = 'idle';
-              if (onActionComplete) onActionComplete();
+            if (currentActionRef.current === 'pet' && isInteractivePettingRef.current) {
+              // 직접 쓰다듬기 도중에는 2초가 지나도 포즈가 끝나지 않고 계속 유지되도록 막음
+              actionProgressRef.current = 0; // 진행도를 계속 0으로 고정하여 종료 방지
+            } else {
+              actionProgressRef.current += delta;
+              // Sleep stays longer
+              const duration = currentActionRef.current === 'sleep' ? 3.0 : 2.0;
+              if (actionProgressRef.current >= duration) {
+                currentActionRef.current = 'idle';
+                if (onActionComplete) onActionComplete();
+              }
             }
           }
           
@@ -298,6 +361,8 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
     animate();
 
     return () => {
+      window.removeEventListener('mousemove', handlePointerMove);
+      window.removeEventListener('touchmove', handlePointerMove);
       cancelAnimationFrame(animationId);
       resizeObserver.disconnect();
       controls.dispose();
@@ -308,11 +373,27 @@ export const VRMViewer: React.FC<VRMViewerProps> = ({
 
   return (
     <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-sm z-10 transition-opacity">
-          <div className="text-white font-medium animate-pulse">Loading Character...</div>
-        </div>
-      )}
+      <AnimatePresence>
+        {loading && (
+          <motion.div 
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="absolute inset-0 flex flex-col items-center justify-center bg-vibrant-bg z-50 pointer-events-none"
+          >
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#fff9fb_0%,#ffd1dc_100%)] opacity-80" />
+            <div className="relative z-10 flex flex-col items-center gap-4">
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 border-4 border-vibrant-pink/20 rounded-full" />
+                <div className="absolute inset-0 border-4 border-vibrant-pink border-t-transparent rounded-full animate-spin" />
+              </div>
+              <div className="text-vibrant-pink font-bold text-lg tracking-widest animate-pulse">
+                캐릭터를 불러오는 중...
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <canvas ref={canvasRef} className="w-full h-full" />
     </div>
   );
