@@ -320,6 +320,16 @@ export default function App() {
           }
         ];
         break;
+      case 'sleep':
+        setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `sleep_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
+        choices = [
+          {
+             label: '재우기 (다음 날로 진행)',
+             apCost: state.ap, // uses all remaining AP
+             action: () => executeSleep()
+          }
+        ];
+        break;
     }
     setActiveChoices(choices);
   };
@@ -613,5 +623,3 @@ export default function App() {
     </div>
   );
 }
-
-
