@@ -8,15 +8,18 @@ import { VRMViewer } from './components/vrm/VRMViewer';
 import { StatsDisplay } from './components/game/StatsDisplay';
 import { DialogueBox } from './components/game/DialogueBox';
 import { useGameState } from './hooks/useGameState';
-import { Dialogue } from './types';
+import { Dialogue, Choice, GameStats } from './types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Pizza, Bath, Hand, Moon, Gamepad2 } from 'lucide-react';
+import { Pizza, Bath, Hand, Moon, Gamepad2, Sunrise, Navigation } from 'lucide-react';
 import { getDialogue } from './services/dialogueManager';
 
 export default function App() {
-  const { state, updateStats, setMood, interact } = useGameState();
+  const { state, updateStats, setMood, interact, advancePhase, useAp, sleepToNextDay } = useGameState();
   const [currentAction, setCurrentAction] = useState<'idle' | 'feed' | 'clean' | 'pet' | 'sleep' | 'play'>('idle');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [interactionUI, setInteractionUI] = useState<string | null>(null);
+  const [activeChoices, setActiveChoices] = useState<Choice[]>([]);
+  
   const [dialogue, setDialogue] = useState<Dialogue>({
     speaker: '콜롬비나',
     text: getDialogue('system', 'greeting'),
@@ -47,11 +50,22 @@ export default function App() {
   useEffect(() => {
     if (currentAction !== 'idle') return; // 다른 행동 중일 땐 방해 금지
 
-    // 12초마다 한 번씩 스탯을 확인하여 이벤트를 발생시킬지 확률적으로 결정 (40% 확률로 이벤트 발생)
     const randomEventTimer = setInterval(() => {
       if (Math.random() > 0.4) return;
 
       const candidates: Array<() => void> = [];
+
+      // 스트레스 기반 특수 이벤트 (가장 우선순위 높음)
+      if (state.stress > 80) {
+        setMood('sad');
+        setDialogue({
+          speaker: '콜롬비나',
+          text: '...나한테 왜 이래? 가슴이 꽉 막힌 것처럼 답답해. ...숨쉬기 힘들어.',
+          mood: 'sad',
+          timestamp: Date.now()
+        });
+        return; // 스트레스 이벤트 발생 시 다른 랜덤 수직 이벤트 무시
+      }
 
       // 1. 체력이 낮을 때 (30미만) - 졸음
       if (state.energy < 30) {
@@ -99,7 +113,7 @@ export default function App() {
         // 부정적인 요소들이 배 열에 담겼다면, 그 중 하나를 무작위로 추첨해 발동
         const event = candidates[Math.floor(Math.random() * candidates.length)];
         event();
-      } else if (state.happiness >= 80) {
+      } else if (state.happiness >= 80 && state.stress < 30) {
         // 상태가 모두 멀쩡하고 호감도가 매우 높을 때 (50% 추가 확률로 기분좋은 모션/대사 출력)
         if (Math.random() < 0.5) {
           const isShy = Math.random() > 0.5;
@@ -115,7 +129,7 @@ export default function App() {
     }, 12000);
 
     return () => clearInterval(randomEventTimer);
-  }, [state.energy, state.hunger, state.cleanliness, state.happiness, currentAction, setMood]);
+  }, [state.energy, state.hunger, state.cleanliness, state.happiness, state.stress, currentAction, setMood]);
 
   // 마우스 웨이크업 (방치 감지)
   useEffect(() => {
@@ -168,6 +182,20 @@ export default function App() {
   // 광클 (Rapid Click) 처리
   const clickTimesRef = useRef<number[]>([]);
 
+  const prevLoading = useRef(loading);
+  useEffect(() => {
+    if (prevLoading.current === true && loading === false && state.ap <= 0 && currentAction !== 'sleep') {
+      setDialogue({
+        speaker: '콜롬비나',
+        text: '...살짝 지치네. 잠깐 쉬자.',
+        mood: 'tired',
+        timestamp: Date.now()
+      });
+      setMood('tired');
+    }
+    prevLoading.current = loading;
+  }, [loading, state.ap, currentAction, setDialogue, setMood]);
+
   const handleRapidClick = () => {
     if (loading) return; // 다른 모션 진행 중엔 무시
     const now = Date.now();
@@ -210,83 +238,268 @@ export default function App() {
     }
   };
 
-  const handleAction = async (actionType: 'feed' | 'clean' | 'pet' | 'sleep' | 'play') => {
+  const getHappinessLevel = (happiness: number): string => {
+    if (happiness >= 80) return 'high';
+    if (happiness < 30) return 'low';
+    return 'normal';
+  };
+
+  const openActionMenu = (actionType: 'feed' | 'clean' | 'pet' | 'sleep' | 'play') => {
+    if (state.ap <= 0 && actionType !== 'sleep') {
+      setDialogue({ speaker: '시스템', text: '시간이 늦었습니다. 다음 시간으로 넘어가거나 수면을 취하세요.', mood: 'neutral', timestamp: Date.now() });
+      return;
+    }
+    
+    setInteractionUI(actionType);
+    let choices: Choice[] = [];
+    let hLevel = getHappinessLevel(state.happiness);
+    
+    switch (actionType) {
+      case 'feed':
+        setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `feed_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
+        choices = [
+          {
+            label: '따끈한 빵 주기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executeFeed('bread')
+          },
+          {
+            label: '수제 샌드위치 주기 (AP 2 소모)',
+            apCost: 2,
+            action: () => executeFeed('sandwich')
+          },
+          {
+            label: '홍차 끓여주기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executeFeed('tea')
+          }
+        ];
+        break;
+      case 'clean':
+        setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `clean_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
+        choices = [
+          {
+            label: '물수건으로 닦아주기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executeClean('towel')
+          },
+          {
+            label: '목욕 시키기 (AP 2 소모)',
+            apCost: 2,
+            action: () => executeClean('bath')
+          }
+        ];
+        break;
+      case 'pet':
+        setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `pet_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
+        choices = [
+          {
+            label: '부드럽게 쓰다듬기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executePet('soft')
+          },
+          {
+            label: '장난스럽게 헝클어뜨리기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executePet('tease')
+          }
+        ];
+        break;
+      case 'play':
+        setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `play_${hLevel}`), mood: 'neutral', timestamp: Date.now() });
+        choices = [
+          {
+            label: '보드게임 하기 (AP 1 소모)',
+            apCost: 1,
+            action: () => executePlay('boardgame')
+          },
+          {
+            label: '달빛 피하기 놀이 (AP 2 소모)',
+            apCost: 2,
+            action: () => executePlay('moonlight')
+          }
+        ];
+        break;
+    }
+    setActiveChoices(choices);
+  };
+
+  const closeActionMenu = () => {
+    setInteractionUI(null);
+    setActiveChoices([]);
+    setDialogue({ speaker: '콜롬비나', text: getDialogue('interaction', `menu_cancel_${getHappinessLevel(state.happiness)}`), mood: 'neutral', timestamp: Date.now() });
+  };
+
+  const applyAction = (actionType: 'idle' | 'feed' | 'clean' | 'pet' | 'sleep' | 'play', text: string, mood: Dialogue['mood'], stats: Partial<GameStats>, apCost: number) => {
+    if (state.ap < apCost) return; // safeguard
+
+    setInteractionUI(null);
+    setActiveChoices([]);
     setLoading(true);
     setCurrentAction(actionType);
     
-    let text = '';
-    let mood: Dialogue['mood'] = 'neutral';
+    useAp(apCost);
+    updateStats(stats);
+    
+    setDialogue({ speaker: '콜롬비나', text, mood, timestamp: Date.now() });
+    if (mood) setMood(mood);
 
-    switch (actionType) {
-      case 'feed':
-        updateStats({ hunger: Math.min(100, state.hunger + 20), xp: state.xp + 10 });
-        if (state.hunger < 30) {
-          text = getDialogue('feed', 'hungry');
-          mood = 'happy';
-        } else if (state.hunger > 80) {
-          text = getDialogue('feed', 'full');
-          mood = 'neutral';
-        } else {
-          text = getDialogue('feed', 'normal');
-          mood = 'happy';
-        }
-        break;
-      case 'clean':
-        updateStats({ cleanliness: 100, xp: state.xp + 5 });
-        if (state.cleanliness < 50) {
-          text = getDialogue('clean', 'dirty');
-          mood = 'neutral';
-        } else {
-          text = getDialogue('clean', 'normal');
-          mood = 'angry';
-        }
-        break;
-      case 'pet':
-        updateStats({ energy: Math.max(0, state.energy - 5), happiness: Math.min(100, state.happiness + 10), xp: state.xp + 5 });
-        if (state.energy < 20) {
-          text = getDialogue('pet', 'tired');
-          mood = 'tired';
-        } else {
-          text = getDialogue('pet', 'normal');
-          mood = 'excited';
-        }
-        break;
-      case 'sleep':
-        updateStats({ 
-          energy: Math.min(100, state.energy + 40), 
-          hunger: Math.max(0, state.hunger - 10),
-          xp: state.xp + 5 
-        });
-        text = getDialogue('sleep', 'normal');
-        mood = 'neutral';
-        break;
-      case 'play':
-        updateStats({ 
-          happiness: Math.min(100, state.happiness + 25), 
-          energy: Math.max(0, state.energy - 25),
-          hunger: Math.max(0, state.hunger - 15),
-          cleanliness: Math.max(0, state.cleanliness - 15),
-          xp: state.xp + 20 
-        });
-        if (state.energy < 30) {
-          text = getDialogue('play', 'tired');
-          mood = 'happy';
-        } else {
-          text = getDialogue('play', 'normal');
-          mood = 'excited';
-        }
-        break;
+    setTimeout(() => {
+      setLoading(false);
+    }, 2000);
+  };
+
+  const executeFeed = (type: string) => {
+    let text = getDialogue('feed', 'normal');
+    let mood: Dialogue['mood'] = 'happy';
+    let stats: Partial<GameStats> = { hunger: state.hunger + 20, xp: state.xp + 10, happiness: state.happiness };
+    let cost = 1;
+
+    // Use current states mixed with interaction choice
+    if (type === 'bread') {
+      text = getDialogue('interaction', 'feed_bread') || getDialogue('feed', 'hungry');
+      stats.hunger += 25;
+      stats.happiness += 5;
+    } else if (type === 'sandwich') {
+      text = getDialogue('interaction', 'feed_sandwich');
+      stats.hunger += 40;
+      stats.happiness += 15;
+      cost = 2;
+      mood = 'excited';
+    } else if (type === 'tea') {
+      text = getDialogue('interaction', 'feed_tea');
+      stats.stress = Math.max(0, state.stress - 15);
+      stats.hunger += 10;
+      mood = 'neutral';
     }
 
-    setDialogue({ 
-      speaker: '콜롬비나', 
-      text, 
-      mood,
-      timestamp: Date.now() 
-    });
-    setMood(mood);
+    if (state.hunger > 80 && type !== 'tea') {
+      text = getDialogue('feed', 'full');
+      mood = 'neutral';
+    }
+
+    applyAction('feed', text, mood, stats, cost);
+  };
+
+  const executeClean = (type: string) => {
+    let text = getDialogue('clean', 'normal');
+    let mood: Dialogue['mood'] = 'neutral';
+    let stats: Partial<GameStats> = { cleanliness: 100, xp: state.xp + 5, happiness: state.happiness };
+    let cost = 1;
+
+    if (state.happiness < 30 && Math.random() < 0.5) {
+      text = getDialogue('interaction', 'reject_clean') || '...내버려 둬. 귀찮게 하지 마.';
+      mood = 'angry';
+      stats = { happiness: Math.max(0, state.happiness - 5) };
+      applyAction('clean', text, mood, stats, cost);
+      return;
+    }
+
+    if (type === 'towel') {
+      text = getDialogue('clean', 'dirty');
+      mood = 'happy';
+    } else if (type === 'bath') {
+      text = getDialogue('interaction', 'clean_bath');
+      stats.happiness += 10;
+      stats.stress = Math.max(0, state.stress - 20);
+      cost = 2;
+      mood = 'happy';
+      if (state.cleanliness > 80) {
+          text = getDialogue('interaction', 'clean_bath_clean');
+          mood = 'excited';
+      }
+    }
+
+    applyAction('clean', text, mood, stats, cost);
+  };
+
+  const executePet = (type: string) => {
+    let text = getDialogue('pet', 'normal');
+    let mood: Dialogue['mood'] = 'excited';
+    let stats: Partial<GameStats> = { energy: Math.max(0, state.energy - 5), happiness: Math.min(100, state.happiness + 10), xp: state.xp + 5 };
+    let cost = 1;
+
+    if (state.happiness < 30 && Math.random() < 0.5) {
+      text = getDialogue('interaction', 'reject_touch') || '...손 대지 마. 기분 나빠.';
+      mood = 'angry';
+      stats = { happiness: Math.max(0, state.happiness - 5) };
+      applyAction('pet', text, mood, stats, cost);
+      return;
+    }
+
+    if (type === 'soft') {
+      if (state.energy < 20) {
+        text = getDialogue('pet', 'tired');
+        mood = 'tired';
+      }
+    } else if (type === 'tease') {
+      if (state.happiness >= 80) {
+        text = getDialogue('interaction', 'pet_tease_high') || '...으음, 그만해애... 조금 간지러워.';
+        stats.happiness = Math.min(100, state.happiness + 2);
+        mood = 'happy';
+      } else {
+        text = getDialogue('interaction', 'pet_tease') || '아, 진짜...! 머리 헝클어지잖아. ...뭐, 복수할 거니까 기대해.';
+        stats.happiness = Math.max(0, state.happiness - 5);
+        mood = 'angry';
+      }
+    }
+
+    applyAction('pet', text, mood, stats, cost);
+  };
+
+  const executePlay = (type: string) => {
+    let text = getDialogue('play', 'normal');
+    let mood: Dialogue['mood'] = 'excited';
+    let stats: Partial<GameStats> = { 
+      happiness: Math.min(100, state.happiness + 25), 
+      energy: Math.max(0, state.energy - 20),
+      hunger: Math.max(0, state.hunger - 15),
+      cleanliness: Math.max(0, state.cleanliness - 10),
+      xp: state.xp + 20,
+      stress: Math.max(0, state.stress - 15)
+    };
+    let cost = 1;
+
+    if (state.happiness < 30 && Math.random() < 0.5) {
+      text = getDialogue('interaction', 'reject_play') || '...됐어. 너랑 놀 기분 아니야.';
+      mood = 'angry';
+      stats = { happiness: Math.max(0, state.happiness - 5) };
+      applyAction('play', text, mood, stats, cost);
+      return;
+    }
+
+    if (state.energy < 30) {
+      text = getDialogue('play', 'tired');
+      mood = 'tired';
+    } else if (type === 'boardgame') {
+      text = getDialogue('interaction', 'play_boardgame');
+      stats.energy -= 10;
+    } else if (type === 'moonlight') {
+      text = getDialogue('interaction', 'play_moonlight');
+      stats.happiness += 40;
+      stats.energy -= 35;
+      stats.stress = 0;
+      cost = 2;
+      mood = 'happy';
+    }
+
+    applyAction('play', text, mood, stats, cost);
+  };
+
+  const executeSleep = () => {
+    let text = getDialogue('sleep', 'normal');
     
-    // 2초간 쿨타임 (버튼 비활성화 유지)
+    setInteractionUI(null);
+    setActiveChoices([]);
+    setLoading(true);
+    setCurrentAction('sleep');
+    
+    // Calls sleepToNextDay which handles all AP, phase, day, and stat resets 
+    sleepToNextDay();
+    
+    setDialogue({ speaker: '콜롬비나', text, mood: 'neutral', timestamp: Date.now() });
+    setMood('neutral');
+
     setTimeout(() => {
       setLoading(false);
     }, 2000);
@@ -318,29 +531,78 @@ export default function App() {
       <StatsDisplay state={state} />
 
       {/* Interaction Menu (Right Side) */}
-      <div className="absolute right-10 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-5">
-        {[
-          { icon: <Pizza size={28} />, label: '밥먹이기', type: 'feed' as const },
-          { icon: <Bath size={28} />, label: '씻기기', type: 'clean' as const },
-          { icon: <Hand size={28} />, label: '쓰담쓰담', type: 'pet' as const },
-          { icon: <Moon size={28} />, label: '재우기', type: 'sleep' as const },
-          { icon: <Gamepad2 size={28} />, label: '놀아주기', type: 'play' as const },
-        ].map((btn) => (
-          <button
-            key={btn.label}
-            onClick={() => handleAction(btn.type)}
-            disabled={loading}
-            className="group relative w-20 h-20 rounded-full bg-white border-none shadow-[0_6px_15px_rgba(255,105,180,0.3)] cursor-pointer flex flex-col justify-center items-center gap-1 transition-all duration-200 hover:scale-110 hover:bg-[#fff0f5] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-95"
+      <AnimatePresence>
+        {!interactionUI && (
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className="absolute right-10 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-5"
           >
-            <span className="text-vibrant-accent group-hover:scale-110 transition-transform">
-              {btn.icon}
-            </span>
-            <span className="text-[10px] font-bold text-vibrant-accent uppercase tracking-tighter">
-              {btn.label}
-            </span>
-          </button>
-        ))}
-      </div>
+            {[
+              { icon: <Pizza size={28} />, label: '밥먹이기', type: 'feed' as const },
+              { icon: <Bath size={28} />, label: '씻기기', type: 'clean' as const },
+              { icon: <Hand size={28} />, label: '쓰담쓰담', type: 'pet' as const },
+              { icon: <Gamepad2 size={28} />, label: '놀아주기', type: 'play' as const },
+              { icon: <Moon size={28} />, label: '재우기', type: 'sleep' as const },
+            ].map((btn) => (
+              <button
+                key={btn.label}
+                onClick={() => openActionMenu(btn.type)}
+                disabled={loading || state.ap <= 0}
+                className="group relative w-16 h-16 md:w-20 md:h-20 rounded-full bg-white border-none shadow-[0_6px_15px_rgba(255,105,180,0.3)] cursor-pointer flex flex-col justify-center items-center gap-1 transition-all duration-200 hover:scale-110 hover:bg-[#fff0f5] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-95"
+              >
+                <span className="text-vibrant-accent group-hover:scale-110 transition-transform">
+                  {btn.icon}
+                </span>
+                <span className="text-[9px] md:text-[10px] font-bold text-vibrant-accent uppercase tracking-tighter">
+                  {btn.label}
+                </span>
+              </button>
+            ))}
+            
+            {/* Advance Phase Button */}
+            <button
+               onClick={() => { 
+                 advancePhase(); 
+                 setDialogue({speaker:'시스템', text:'다음 시간으로 이동했습니다.', mood: 'neutral', timestamp: Date.now()}); 
+               }}
+               className="mt-6 px-4 py-2 bg-gray-800 text-white font-bold rounded-2xl shadow-lg border-2 border-white hover:bg-gray-700 transition"
+            >
+               시간 보내기
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Choice Menu Overlay */}
+      <AnimatePresence>
+        {interactionUI && activeChoices.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 flex flex-col gap-3 w-[320px] md:w-[400px]"
+          >
+            {activeChoices.map((choice, idx) => (
+              <button
+                key={idx}
+                onClick={choice.action}
+                disabled={state.ap < (choice.apCost || 0)}
+                className="w-full relative overflow-hidden group bg-white/95 backdrop-blur-md border-[3px] border-vibrant-pink rounded-[20px] p-4 text-center font-bold text-vibrant-dark shadow-[0_8px_20px_rgba(255,105,180,0.2)] hover:bg-[#fff0f5] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:grayscale"
+              >
+                {choice.label}
+              </button>
+            ))}
+            <button
+               onClick={closeActionMenu}
+               className="w-full mt-4 bg-gray-200 text-gray-700 rounded-[20px] p-3 text-center font-bold shadow-md hover:bg-gray-300 transition-colors"
+            >
+               취소
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Dialogue System */}
       <DialogueBox 
